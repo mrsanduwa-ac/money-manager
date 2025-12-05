@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Money Manager Pro</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- React & Libraries -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+    
+    <!-- Icons (Vanilla Lucide) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; touch-action: manipulation; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .animate-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Smooth scrolling */
+        html { scroll-behavior: smooth; }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- MAIN REACT APPLICATION SCRIPT -->
+    <script type="text/babel">
+        // --------------------------------------------------------
+        // 1. CONFIGURATION
+        // --------------------------------------------------------
+        
+        // !!! IMPORTANT: Paste your new Google Apps Script URL here !!!
+        const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbylu6VnMOFJSOt7JGGUnDTQxUXBP2Oc55eUy_9KAQouMX6LlVo4xddbphAEjBsDorOwog/exec';
+        
+        const USER_ID = 'money_manager_user';
+        
+        const ACCOUNTS = [
+            'Sampath Bank', 'Commercial Bank', 'HNB Bank', 'Peoples Bank', 
+            'Dialog Finance', 'Solo', 'Wallet'
+        ];
+        
+        const LOAN_ACCOUNTS = [
+            'Peoples Bank Loan', 'Dialog Finance Loan'
+        ];
+
+        const ACCOUNT_COLORS = {
+            'Sampath Bank': 'from-orange-500 to-orange-600',
+            'Commercial Bank': 'from-blue-500 to-blue-600',
+            'HNB Bank': 'from-yellow-500 to-yellow-600',
+            'Peoples Bank': 'from-red-500 to-red-600',
+            'Dialog Finance': 'from-red-700 to-red-800',
+            'Solo': 'from-purple-500 to-purple-600',
+            'Wallet': 'from-slate-700 to-slate-800',
+            'Peoples Bank Loan': 'from-red-900 to-red-950',
+            'Dialog Finance Loan': 'from-red-900 to-red-950',
+        };
+
+        // --------------------------------------------------------
+        // 2. HELPERS & API
+        // --------------------------------------------------------
+
+        const { useState, useEffect, useMemo } = React;
+        const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } = Recharts;
+
+        // Custom Icon Component handling Lucide rendering in React
+        const Icon = ({ name, className, size = 20 }) => {
+            // We use an <i> tag which Lucide will replace, or we render SVG manually if needed.
+            // For stability in React re-renders with vanilla Lucide, passing ref is better,
+            // but for simplicity in this single file, we will re-scan.
+            return <i data-lucide={name} className={className} style={{ fontSize: size }}></i>;
+        };
+
+        const api = {
+            fetchTransactions: async () => {
+                if(GAS_API_URL.includes("YOUR_GAS")) { alert("Please set GAS_API_URL in index.html!"); return []; }
+                const res = await fetch(`${GAS_API_URL}?action=fetchData&userId=${USER_ID}`);
+                return await res.json();
+            },
+            addTransaction: async (data) => {
+                const payload = {
+                    action: 'addTransaction',
+                    userId: USER_ID,
+                    data: { ...data, id: crypto.randomUUID(), date: new Date().toISOString() }
+                };
+                return await sendPost(payload);
+            },
+            updateTransaction: async (id, updates, pin) => {
+                const payload = {
+                    action: 'updateStatus',
+                    userId: USER_ID,
+                    transactionId: id,
+                    updates,
+                    pin
+                };
+                return await sendPost(payload);
+            }
+        };
+
+        async function sendPost(payload) {
+            try {
+                // Using 'no-cors' might hide errors, so we try standard first.
+                // If you get CORS errors, ensure GAS is deployed as "Anyone".
+                const res = await fetch(GAS_API_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                const json = await res.json();
+                return json.success;
+            } catch (e) {
+                console.error("API Error", e);
+                return false;
+            }
+        }
+
+        // --------------------------------------------------------
+        // 3. UI COMPONENTS
+        // --------------------------------------------------------
+
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            useEffect(() => {
+                if(isOpen) document.body.style.overflow = 'hidden';
+                else document.body.style.overflow = 'unset';
+            }, [isOpen]);
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-60 backdrop-blur-sm animate-in">
+                    <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh]">
+                        <div className="flex justify-between items-center p-5 border-b border-gray-100">
+                            <h3 className="text-xl font-bold text-gray-800">{title}</h3>
+                            <button onClick={onClose} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition">
+                                <Icon name="x" className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-y-auto">
+                            {children}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const BalanceCard = ({ name, balance, onClick }) => {
+            const bgClass = ACCOUNT_COLORS[name] || 'from-gray-500 to-gray-600';
+            const formatted = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'LKR' }).format(balance);
+            
+            return (
+                <div onClick={onClick} className={`relative flex-shrink-0 w-80 h-48 rounded-2xl p-6 text-white shadow-xl bg-gradient-to-br ${bgClass} cursor-pointer transform transition-all duration-300 hover:-translate-y-2 mr-6`}>
+                    <div className="flex justify-between items-start z-10 relative">
+                        <div>
+                            <p className="text-xs font-medium opacity-80 uppercase tracking-wider">Balance</p>
+                            <h3 className="text-2xl font-bold mt-1">{formatted}</h3>
+                        </div>
+                        <Icon name={name === 'Wallet' ? 'wallet' : 'landmark'} className="w-8 h-8 opacity-80" />
+                    </div>
+                    <div className="absolute bottom-6 left-6 z-10">
+                        <p className="text-lg font-semibold tracking-wide">{name}</p>
+                    </div>
+                    <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white opacity-10 rounded-full blur-xl"></div>
+                </div>
+            );
+        };
+
+        const EditModal = ({ transaction, isOpen, onClose, onUpdate, loading }) => {
+            const [pin, setPin] = useState('');
+            const [amount, setAmount] = useState('');
+            const [account, setAccount] = useState('');
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                if (transaction) {
+                    setAmount(transaction.amount);
+                    setAccount(transaction.bank_account || '');
+                    setPin('');
+                    setError('');
+                }
+            }, [transaction]);
+
+            const handleSubmit = async () => {
+                if (!pin) { setError('PIN is required'); return; }
+                
+                const updates = { is_paid: true };
+                
+                if (transaction.type === 'repair') {
+                    const price = parseFloat(amount);
+                    if (isNaN(price) || price <= 0) { setError('Invalid price'); return; }
+                    if (!account) { setError('Select Account'); return; }
+                    updates.amount = price;
+                    updates.original_amount = price;
+                    updates.bank_account = account;
+                    updates.price_status = 'Added';
+                }
+
+                const success = await onUpdate(transaction.id, updates, pin);
+                if (success) onClose();
+                else setError('Incorrect PIN or Failed to Update');
+            };
+
+            if (!transaction) return null;
+            const isRepair = transaction.type === 'repair';
+
+            return (
+                <Modal isOpen={isOpen} onClose={onClose} title={isRepair ? "Complete Repair Job" : "Mark as Paid"}>
+                    <div className="space-y-4">
+                        {isRepair && (
+                            <>
+                                <div className="p-3 bg-blue-50 text-blue-800 rounded mb-2 text-sm">
+                                    Closing Job: <strong>{transaction.customer_name}</strong>
+                                </div>
+                                <Input label="Final Price (LKR)" type="number" value={amount} onChange={e => setAmount(e.target.value)} />
+                                <Select label="Received To" options={ACCOUNTS} value={account} onChange={e => setAccount(e.target.value)} />
+                            </>
+                        )}
+                        {!isRepair && (
+                            <div className="p-3 bg-gray-50 rounded text-gray-700 text-sm">
+                                Confirm transaction of <strong>LKR {transaction.amount}</strong> as complete?
+                            </div>
+                        )}
+                        
+                        <div className="border-t pt-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Security PIN</label>
+                            <input type="password" value={pin} onChange={e => {setPin(e.target.value); setError('')}} className="w-full border rounded-lg p-2 text-center text-lg tracking-widest focus:ring-2 focus:ring-blue-500 outline-none" placeholder="****" />
+                            {error && <p className="text-red-500 text-xs mt-2 text-center font-bold bg-red-50 p-1 rounded">{error}</p>}
+                        </div>
+                        <button onClick={handleSubmit} disabled={loading} className="w-full bg-emerald-600 text-white p-3 rounded-lg font-bold hover:bg-emerald-700 transition shadow-md">
+                            {loading ? 'Verifying...' : 'Confirm Update'}
+                        </button>
+                    </div>
+                </Modal>
+            );
+        };
+
+        const Input = ({ label, ...props }) => (
+            <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                <input className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50" {...props} />
+            </div>
+        );
+
+        const Select = ({ label, options, ...props }) => (
+            <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                <select className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50" {...props}>
+                    <option value="">Select Option</option>
+                    {options.map(o => <option key={o} value={o}>{o.replace(' Loan', '')}</option>)}
+                </select>
+            </div>
+        );
+
+        const ActionButton = ({ icon, label, color, onClick, className = '' }) => (
+            <button onClick={onClick} className={`flex flex-col items-center justify-center p-4 rounded-2xl shadow-md text-white transition-transform active:scale-95 hover:shadow-lg ${color} ${className}`}>
+                <Icon name={icon} className="w-6 h-6 mb-2" />
+                <span className="text-sm font-semibold">{label}</span>
+            </button>
+        );
+
+        // --------------------------------------------------------
+        // 4. MAIN APP COMPONENT
+        // --------------------------------------------------------
+
+        const App = () => {
+            const [transactions, setTransactions] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [modalType, setModalType] = useState(null);
+            const [selectedAccount, setSelectedAccount] = useState(null);
+            const [formData, setFormData] = useState({});
+            const [editTxn, setEditTxn] = useState(null);
+            const [refreshKey, setRefreshKey] = useState(0);
+
+            // Re-scan icons after render
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            });
+
+            // Initial Load
+            useEffect(() => {
+                const load = async () => {
+                    setLoading(true);
+                    try {
+                        const data = await api.fetchTransactions();
+                        if(Array.isArray(data)) setTransactions(data.sort((a,b) => new Date(b.date) - new Date(a.date)));
+                        else console.error("Data is not array", data);
+                    } catch(e) { console.error(e); }
+                    setLoading(false);
+                };
+                load();
+            }, [refreshKey]);
+
+            // Calculate Balances
+            const balances = useMemo(() => {
+                const bal = {};
+                [...ACCOUNTS, ...LOAN_ACCOUNTS].forEach(a => bal[a] = 0);
+                transactions.forEach(t => {
+                    const isLoan = LOAN_ACCOUNTS.includes(t.bank_account);
+                    // Safe parsing
+                    const val = parseFloat(t.amount) || 0;
+                    
+                    if (t.type === 'deposit') {
+                        if (t.bank_account) isLoan ? bal[t.bank_account] -= val : bal[t.bank_account] += val;
+                    } 
+                    else if (t.type === 'withdrawal' && t.bank_account) bal[t.bank_account] -= val;
+                    else if (t.type === 'reload' && t.is_paid && t.bank_account) bal[t.bank_account] -= val;
+                    else if (t.type === 'repair' && t.price_status === 'Added' && t.is_paid && t.bank_account) bal[t.bank_account] += val;
+                    else if (t.type === 'loan_acquisition' && isLoan) bal[t.bank_account] += val;
+                });
+                return bal;
+            }, [transactions]);
+
+            // Monthly Stats
+            const stats = useMemo(() => {
+                const now = new Date();
+                let inc = 0, exp = 0;
+                transactions.forEach(t => {
+                    const d = new Date(t.date);
+                    const val = parseFloat(t.amount) || 0;
+                    if(d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
+                        if (t.type === 'deposit' || (t.type === 'repair' && t.is_paid)) inc += val;
+                        if (t.type === 'withdrawal' || (t.type === 'reload' && t.is_paid)) exp += val;
+                    }
+                });
+                return { inc, exp, net: inc - exp };
+            }, [transactions]);
+
+            // Form Handler
+            const handleInput = (e) => setFormData({...formData, [e.target.name]: e.target.value});
+
+            const handleSubmit = async () => {
+                setLoading(true);
+                let success = false;
+                const amt = parseFloat(formData.amount || 0);
+                // Basic validation
+                if (isNaN(amt) && modalType !== 'repair' && modalType !== 'reload') {
+                    alert("Please enter a valid amount");
+                    setLoading(false);
+                    return;
+                }
+                
+                const base = { ...formData, amount: amt };
+
+                if (modalType === 'deposit') success = await api.addTransaction({ ...base, type: 'deposit', is_paid: true });
+                else if (modalType === 'withdraw') success = await api.addTransaction({ ...base, type: 'withdrawal', is_paid: true });
+                else if (modalType === 'reload') success = await api.addTransaction({ ...base, type: 'reload', is_paid: formData.is_paid === 'true', date: formData.date || new Date().toISOString() });
+                else if (modalType === 'repair') success = await api.addTransaction({ ...base, type: 'repair', is_paid: false, price_status: amt > 0 ? 'Added' : 'Pending', original_amount: amt });
+                else if (modalType === 'loan') {
+                    const s1 = await api.addTransaction({ type: 'loan_acquisition', amount: amt, bank_account: formData.loan_account, reason: 'Loan: ' + formData.reason, is_paid: true });
+                    if(s1) success = await api.addTransaction({ type: 'deposit', amount: amt, bank_account: formData.bank_account, reason: 'Loan Funds', is_paid: true });
+                }
+
+                if (success) {
+                    setModalType(null);
+                    setFormData({});
+                    setRefreshKey(k => k + 1);
+                } else {
+                    alert('Transaction Error. Check Log.');
+                }
+                setLoading(false);
+            };
+
+            const chartData = [
+                { name: 'Income', val: stats.inc, fill: '#10B981' },
+                { name: 'Expense', val: stats.exp, fill: '#EF4444' }
+            ];
+
+            const formatMoney = (v) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'LKR', minimumFractionDigits: 0 }).format(v);
+
+            return (
+                <div className="min-h-screen pb-20 md:pb-10">
+                    {/* Header */}
+                    <div className="bg-white shadow sticky top-0 z-40 px-4 h-16 flex items-center justify-between">
+                        <div className="flex items-center">
+                            <div className="bg-blue-600 p-2 rounded-lg mr-2">
+                                <Icon name="wallet" className="text-white w-5 h-5" />
+                            </div>
+                            <h1 className="text-xl font-bold text-gray-800 tracking-tight">Money Manager</h1>
+                        </div>
+                        <button onClick={() => setRefreshKey(k => k+1)} className="p-2 text-gray-500 hover:text-blue-600 transition bg-gray-50 rounded-full">
+                            <Icon name="refresh-cw" className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
+                    </div>
+
+                    <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+                        
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border flex justify-between items-center">
+                                <div><p className="text-sm text-gray-500 font-medium">Monthly Income</p><h2 className="text-2xl font-bold text-emerald-600">{formatMoney(stats.inc)}</h2></div>
+                                <div className="bg-emerald-100 p-3 rounded-full"><Icon name="trending-up" className="text-emerald-600" /></div>
+                            </div>
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border flex justify-between items-center">
+                                <div><p className="text-sm text-gray-500 font-medium">Monthly Expense</p><h2 className="text-2xl font-bold text-red-600">{formatMoney(stats.exp)}</h2></div>
+                                <div className="bg-red-100 p-3 rounded-full"><Icon name="trending-down" className="text-red-600" /></div>
+                            </div>
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border flex justify-between items-center">
+                                <div><p className="text-sm text-gray-500 font-medium">Net Savings</p><h2 className={`text-2xl font-bold ${stats.net>=0 ? 'text-blue-600':'text-orange-500'}`}>{formatMoney(stats.net)}</h2></div>
+                                <div className="bg-blue-100 p-3 rounded-full"><Icon name="piggy-bank" className="text-blue-600" /></div>
+                            </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                            <ActionButton icon="plus" label="Deposit" color="bg-emerald-500" onClick={() => setModalType('deposit')} />
+                            <ActionButton icon="minus" label="Withdraw" color="bg-red-500" onClick={() => setModalType('withdraw')} />
+                            <ActionButton icon="smartphone" label="Reload" color="bg-blue-500" onClick={() => setModalType('reload')} />
+                            <ActionButton icon="wrench" label="Repair" color="bg-amber-500" onClick={() => setModalType('repair')} />
+                            <ActionButton icon="landmark" label="Loan" color="bg-purple-600" onClick={() => setModalType('loan')} className="col-span-2 md:col-span-1" />
+                        </div>
+
+                        {/* Horizontal Balance Scroll */}
+                        <div>
+                            <div className="flex justify-between items-center mb-2 px-1">
+                                <h3 className="text-lg font-bold text-gray-800">Accounts</h3>
+                            </div>
+                            <div className="overflow-x-auto pb-4 -mx-4 px-4 scrollbar-hide flex space-x-0 snap-x">
+                                {ACCOUNTS.map(acc => (
+                                    <div key={acc} className="snap-center">
+                                        <BalanceCard name={acc} balance={balances[acc]} onClick={() => setSelectedAccount(acc)} />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Chart */}
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border h-64">
+                            <h3 className="text-sm font-semibold mb-2 text-gray-600">Overview</h3>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={chartData}>
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                                    <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '12px'}} />
+                                    <Bar dataKey="val" radius={[8, 8, 0, 0]}>
+                                        {chartData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+
+                        {/* Transaction List */}
+                        <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                            <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                                <h3 className="font-bold text-gray-800">Recent Transactions {selectedAccount && `(${selectedAccount})`}</h3>
+                                {selectedAccount && <button onClick={() => setSelectedAccount(null)} className="text-sm text-blue-600 font-medium">Clear Filter</button>}
+                            </div>
+                            <div className="divide-y max-h-[500px] overflow-y-auto">
+                                {transactions
+                                    .filter(t => !selectedAccount || t.bank_account === selectedAccount)
+                                    .slice(0, 30)
+                                    .map(t => (
+                                    <div key={t.id} className="p-4 hover:bg-gray-50 flex justify-between items-center transition">
+                                        <div className="flex items-center space-x-3">
+                                            <div className={`p-2.5 rounded-full ${t.is_paid ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                                                <Icon name={t.type === 'repair' ? 'wrench' : t.type === 'reload' ? 'smartphone' : t.type === 'deposit' ? 'arrow-up' : 'arrow-down'} className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="font-semibold text-gray-800 text-sm line-clamp-1">{t.customer_name || t.reason || t.type}</p>
+                                                <p className="text-xs text-gray-500">{new Date(t.date).toLocaleDateString()} • {t.bank_account}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right flex flex-col items-end">
+                                            <p className={`font-bold ${['deposit','repair','loan_acquisition'].includes(t.type) && t.is_paid ? 'text-green-600' : 'text-gray-800'}`}>
+                                                {['withdrawal','reload'].includes(t.type) ? '-' : '+'} {parseFloat(t.amount).toLocaleString()}
+                                            </p>
+                                            {!t.is_paid ? (
+                                                <button onClick={() => setEditTxn(t)} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-200 mt-1 uppercase font-bold tracking-wide">
+                                                    {t.type === 'repair' ? 'Update Price' : 'Mark Paid'}
+                                                </button>
+                                            ) : (
+                                                <span className="text-[10px] text-green-600 bg-green-50 px-2 py-0.5 rounded mt-1 font-medium">Paid</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                                {transactions.length === 0 && <p className="p-8 text-center text-gray-400">No transactions found</p>}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* --- INPUT MODALS --- */}
+                    <Modal isOpen={modalType==='deposit'} onClose={()=>setModalType(null)} title="Make a Deposit">
+                        <div className="space-y-4">
+                            <Input name="amount" label="Amount (LKR)" type="number" onChange={handleInput} />
+                            <Input name="reason" label="Reason" onChange={handleInput} />
+                            <Select name="bank_account" label="Deposit To" options={ACCOUNTS} onChange={handleInput} />
+                            <button onClick={handleSubmit} disabled={loading} className="w-full bg-emerald-600 text-white p-3 rounded-lg font-bold shadow-md hover:bg-emerald-700">{loading ? 'Processing...' : 'Save Deposit'}</button>
+                        </div>
+                    </Modal>
+
+                    <Modal isOpen={modalType==='withdraw'} onClose={()=>setModalType(null)} title="Withdraw Cash">
+                        <div className="space-y-4">
+                            <Input name="amount" label="Amount (LKR)" type="number" onChange={handleInput} />
+                            <Input name="reason" label="Reason" onChange={handleInput} />
+                            <Select name="bank_account" label="Withdraw From" options={ACCOUNTS} onChange={handleInput} />
+                            <button onClick={handleSubmit} disabled={loading} className="w-full bg-red-600 text-white p-3 rounded-lg font-bold shadow-md hover:bg-red-700">{loading ? 'Processing...' : 'Withdraw'}</button>
+                        </div>
+                    </Modal>
+
+                    <Modal isOpen={modalType==='reload'} onClose={()=>setModalType(null)} title="Reload / Bill">
+                        <div className="space-y-4">
+                            <Input name="customer_name" label="Customer / Number" onChange={handleInput} />
+                            <Input name="amount" label="Amount (LKR)" type="number" onChange={handleInput} />
+                            <Input name="date" label="Date" type="date" defaultValue={new Date().toISOString().split('T')[0]} onChange={handleInput} />
+                            <Select name="bank_account" label="Deduct From" options={ACCOUNTS} onChange={handleInput} />
+                            <div className="flex items-center"><input type="checkbox" name="is_paid" value="true" onChange={handleInput} className="mr-2 w-5 h-5" /> <span className="text-gray-700 font-medium">Mark as Paid?</span></div>
+                            <button onClick={handleSubmit} disabled={loading} className="w-full bg-blue-600 text-white p-3 rounded-lg font-bold shadow-md hover:bg-blue-700">Save Transaction</button>
+                        </div>
+                    </Modal>
+
+                    <Modal isOpen={modalType==='repair'} onClose={()=>setModalType(null)} title="Mobile Repair">
+                        <div className="space-y-4">
+                            <Input name="customer_name" label="Customer Name" onChange={handleInput} />
+                            <Input name="phone_name" label="Device Model" onChange={handleInput} />
+                            <Input name="fault" label="Fault" onChange={handleInput} />
+                            <Input name="amount" label="Estimated Price (0 if Pending)" type="number" onChange={handleInput} />
+                            <Select name="bank_account" label="Receive Payment To" options={['', ...ACCOUNTS]} onChange={handleInput} />
+                            <button onClick={handleSubmit} disabled={loading} className="w-full bg-amber-600 text-white p-3 rounded-lg font-bold shadow-md hover:bg-amber-700">Add Job</button>
+                        </div>
+                    </Modal>
+
+                    <Modal isOpen={modalType==='loan'} onClose={()=>setModalType(null)} title="New Loan">
+                        <div className="space-y-4">
+                            <Select name="loan_account" label="Loan Provider" options={LOAN_ACCOUNTS} onChange={handleInput} />
+                            <Input name="amount" label="Loan Amount" type="number" onChange={handleInput} />
+                            <Select name="bank_account" label="Deposit Funds To" options={ACCOUNTS} onChange={handleInput} />
+                            <Input name="reason" label="Purpose" onChange={handleInput} />
+                            <button onClick={handleSubmit} disabled={loading} className="w-full bg-purple-600 text-white p-3 rounded-lg font-bold shadow-md hover:bg-purple-700">Record Loan</button>
+                        </div>
+                    </Modal>
+
+                    <EditModal transaction={editTxn} isOpen={!!editTxn} onClose={()=>setEditTxn(null)} onUpdate={api.updateTransaction} loading={loading} />
+
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
